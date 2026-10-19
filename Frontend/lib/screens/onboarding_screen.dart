@@ -69,7 +69,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         return;
       }
 
-      await _askName();
+      await _askRegisterOrLogin();
     } catch (e) {
       _started = false;
       _setStatus('Unable to start the assistant.');
@@ -127,8 +127,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       });
 
       await _audioService.startRecording();
-
-      // Increased to 8 seconds so the user can comfortably finish their sentence
       await Future.delayed(const Duration(seconds: 8));
 
       if (!mounted) {
@@ -201,7 +199,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // AFFIRMATION & NEGATION HELPERS
+  // HELPERS: AFFIRMATION, NEGATION & SANITIZATION
   // ============================================================
 
   bool _isAffirmative(String text) {
@@ -236,6 +234,59 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return input.trim().replaceAll(RegExp(r'[\.\,\!\?]+$'), '').trim();
   }
 
+  String _cleanPassword(String input) {
+    var pass = input.trim();
+    final prefixes = [
+      'my password should be',
+      'password should be',
+      'my password will be',
+      'password will be',
+      'set password to',
+      'the password is',
+      'my password is',
+      'password is',
+      'it is',
+      "it's",
+      'my password',
+      'password'
+    ];
+    for (final p in prefixes) {
+      if (pass.toLowerCase().startsWith(p) && pass.length > p.length) {
+        pass = pass.substring(p.length).trim();
+        break;
+      }
+    }
+    pass = pass.replaceAll(RegExp(r'[\.\,\!\?]+$'), '').trim();
+    if (RegExp(r'^(\d\s*)+$').hasMatch(pass)) {
+      pass = pass.replaceAll(RegExp(r'\s+'), '');
+    }
+    return pass;
+  }
+
+  String _cleanDob(String input) {
+    var dob = input.trim();
+    final prefixes = [
+      'my date of birth should be',
+      'date of birth should be',
+      'my date of birth is',
+      'date of birth is',
+      'my dob is',
+      'dob is',
+      'i was born on',
+      'it is',
+      "it's",
+      'date of birth',
+      'dob'
+    ];
+    for (final p in prefixes) {
+      if (dob.toLowerCase().startsWith(p) && dob.length > p.length) {
+        dob = dob.substring(p.length).trim();
+        break;
+      }
+    }
+    return dob.replaceAll(RegExp(r'[\.\,\!\?]+$'), '').trim();
+  }
+
   String _sanitizeEmail(String text) {
     var s = text.trim().toLowerCase();
     s = s.replaceAll(' at the rate ', '@');
@@ -256,7 +307,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // STATE MACHINE: ONE STEP AT A TIME
+  // STATE MACHINE: REGISTER VS LOGIN ROUTING
   // ============================================================
 
   Future<void> _handleUserInput(String text) async {
@@ -273,44 +324,71 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     switch (currentStep) {
       case OnboardingStep.welcome:
-      case OnboardingStep.askName:
-        await _handleName(text);
+      case OnboardingStep.askRegisterOrLogin:
+        await _handleRegisterOrLoginChoice(text);
         break;
 
-      case OnboardingStep.confirmName:
-        await _handleNameConfirmation(text);
+      // ----------------- LOGIN STEPS -----------------
+      case OnboardingStep.askLoginUsername:
+        await _handleLoginUsername(text);
         break;
 
-      case OnboardingStep.askEmail:
-        await _handleEmail(text);
+      case OnboardingStep.confirmLoginUsername:
+        await _handleLoginUsernameConfirmation(text);
         break;
 
-      case OnboardingStep.confirmEmail:
-        await _handleEmailConfirmation(text);
+      case OnboardingStep.askLoginPassword:
+        await _handleLoginPassword(text);
         break;
 
-      case OnboardingStep.askPhone:
-        await _handlePhone(text);
+      // ----------------- REGISTRATION STEPS -----------------
+      case OnboardingStep.askRegisterName:
+        await _handleRegisterName(text);
         break;
 
-      case OnboardingStep.confirmPhone:
-        await _handlePhoneConfirmation(text);
+      case OnboardingStep.confirmRegisterName:
+        await _handleRegisterNameConfirmation(text);
         break;
 
+      case OnboardingStep.askRegisterEmail:
+        await _handleRegisterEmail(text);
+        break;
+
+      case OnboardingStep.confirmRegisterEmail:
+        await _handleRegisterEmailConfirmation(text);
+        break;
+
+      case OnboardingStep.askRegisterDob:
+        await _handleRegisterDob(text);
+        break;
+
+      case OnboardingStep.confirmRegisterDob:
+        await _handleRegisterDobConfirmation(text);
+        break;
+
+      case OnboardingStep.askRegisterPhone:
+        await _handleRegisterPhone(text);
+        break;
+
+      case OnboardingStep.confirmRegisterPhone:
+        await _handleRegisterPhoneConfirmation(text);
+        break;
+
+      case OnboardingStep.askRegisterPassword:
+        await _handleRegisterPassword(text);
+        break;
+
+      case OnboardingStep.confirmRegisterPassword:
+        await _handleRegisterPasswordConfirmation(text);
+        break;
+
+      // ----------------- EMERGENCY CONTACT STEPS -----------------
       case OnboardingStep.askEmergencyName:
         await _handleEmergencyName(text);
         break;
 
       case OnboardingStep.confirmEmergencyName:
         await _handleEmergencyNameConfirmation(text);
-        break;
-
-      case OnboardingStep.askEmergencyPhone:
-        await _handleEmergencyPhone(text);
-        break;
-
-      case OnboardingStep.confirmEmergencyPhone:
-        await _handleEmergencyPhoneConfirmation(text);
         break;
 
       case OnboardingStep.askEmergencyRelationship:
@@ -321,12 +399,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await _handleEmergencyRelationshipConfirmation(text);
         break;
 
-      case OnboardingStep.askHomeLocation:
-        await _handleHomeLocation(text);
+      case OnboardingStep.askEmergencyPhone:
+        await _handleEmergencyPhone(text);
         break;
 
-      case OnboardingStep.confirmHomeLocation:
-        await _handleHomeLocationConfirmation(text);
+      case OnboardingStep.confirmEmergencyPhone:
+        await _handleEmergencyPhoneConfirmation(text);
+        break;
+
+      // ----------------- LOCATION STEPS -----------------
+      case OnboardingStep.askLocationName:
+        await _handleLocationName(text);
+        break;
+
+      case OnboardingStep.confirmLocationName:
+        await _handleLocationNameConfirmation(text);
+        break;
+
+      case OnboardingStep.askLocationType:
+        await _handleLocationType(text);
+        break;
+
+      case OnboardingStep.confirmLocationType:
+        await _handleLocationTypeConfirmation(text);
         break;
 
       case OnboardingStep.completed:
@@ -336,23 +431,143 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // 1. FULL NAME STEP
+  // STEP 0: ASK REGISTER OR LOGIN
   // ============================================================
 
-  Future<void> _askName() async {
+  Future<void> _askRegisterOrLogin() async {
     if (!mounted) return;
-    _flow.moveTo(OnboardingStep.askName);
+    _flow.moveTo(OnboardingStep.askRegisterOrLogin);
     _isProcessing = false;
-    await _speak(
-      'Welcome to AI Companion. I will assist you with reading, navigation, and remembering details. '
-      'Let us set up your profile. Please tell me your full name.',
-    );
+    await _speak('Welcome to AI Companion. Do you want to register or login?');
     await _startListening();
   }
 
-  Future<void> _handleName(String text) async {
-    var name = _cleanSpokenText(text);
+  Future<void> _handleRegisterOrLoginChoice(String text) async {
+    final lower = text.toLowerCase().trim();
 
+    if (lower.contains('register') ||
+        lower.contains('new') ||
+        lower.contains('sign up') ||
+        lower.contains('create')) {
+      _flow.moveTo(OnboardingStep.askRegisterName);
+      _isProcessing = false;
+      await _speak('Let us register your account. Please tell me your full name.');
+      await _startListening();
+      return;
+    }
+
+    if (lower.contains('login') ||
+        lower.contains('log in') ||
+        lower.contains('sign in') ||
+        lower.contains('existing')) {
+      _flow.moveTo(OnboardingStep.askLoginUsername);
+      _isProcessing = false;
+      await _speak('Welcome back. Please tell me your user name.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Please say register to create a new account, or login to sign in.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // LOGIN FLOW (USERNAME & PASSWORD VALIDATION)
+  // ============================================================
+
+  Future<void> _handleLoginUsername(String text) async {
+    final name = _cleanSpokenText(text);
+    if (name.isEmpty) {
+      _isProcessing = false;
+      await _speak('I did not catch your user name. Please say it again.');
+      await _startListening();
+      return;
+    }
+
+    _flow.setLoginUsername(name);
+    _flow.moveTo(OnboardingStep.confirmLoginUsername);
+    _isProcessing = false;
+
+    await _speak('Is your user name $name? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleLoginUsernameConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askLoginPassword);
+      _isProcessing = false;
+      await _speak('Please tell me your password.');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askLoginUsername);
+      _isProcessing = false;
+      await _speak('Alright. Please tell me your user name again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your user name ${_flow.loginUsername}? Say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleLoginPassword(String text) async {
+    final password = _cleanPassword(text);
+    _flow.setLoginPassword(password);
+
+    _setStatus('Validating credentials with database...');
+    final result = await _backendApiService.loginUser(
+      userName: _flow.loginUsername ?? '',
+      password: password,
+    );
+
+    _isProcessing = false;
+
+    if (result['success'] == true) {
+      final user = result['user'] as Map<String, dynamic>;
+      final userId = user['user_id'] as int;
+      _flow.setUserId(userId);
+      _flow.setName(user['user_name'] ?? _flow.loginUsername ?? 'User');
+      _flow.moveTo(OnboardingStep.completed);
+
+      await _speak('Login successful! Welcome back, ${_flow.userName}. You can now talk to me, ask me to remember notes, or ask for help anytime.');
+      await _startListening();
+      return;
+    }
+
+    final errorType = result['error_type'];
+
+    if (errorType == 'user_not_found') {
+      await _speak('No user registered with this name. Please register.');
+      _flow.moveTo(OnboardingStep.askRegisterName);
+      await _speak('Let us create your account now. Please tell me your full name.');
+      await _startListening();
+      return;
+    }
+
+    if (errorType == 'incorrect_password') {
+      await _speak('Incorrect password. Please try again.');
+      _flow.moveTo(OnboardingStep.askLoginPassword);
+      await _startListening();
+      return;
+    }
+
+    // Generic error fallback
+    await _speak('Login failed: ${result['message']}. Please try again.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // REGISTRATION FLOW (ORDER: NAME, EMAIL, DOB, PHONE, PASSWORD)
+  // ============================================================
+
+  // 1. NAME
+  Future<void> _handleRegisterName(String text) async {
+    var name = _cleanSpokenText(text);
     final prefixes = ['my name is', 'i am', 'this is', 'name is'];
     for (final p in prefixes) {
       if (name.toLowerCase().startsWith(p)) {
@@ -368,24 +583,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     _flow.setName(name);
-    _flow.moveTo(OnboardingStep.confirmName);
+    _flow.moveTo(OnboardingStep.confirmRegisterName);
     _isProcessing = false;
 
     await _speak('Is your name $name? Please say yes or no.');
     await _startListening();
   }
 
-  Future<void> _handleNameConfirmation(String text) async {
+  Future<void> _handleRegisterNameConfirmation(String text) async {
     if (_isAffirmative(text)) {
-      _flow.moveTo(OnboardingStep.askEmail);
+      _flow.moveTo(OnboardingStep.askRegisterEmail);
       _isProcessing = false;
-      await _speak('Great, ${_flow.userName}. Now, please tell me your email address.');
+      await _speak('Great, ${_flow.userName}. Now please tell me your email address.');
       await _startListening();
       return;
     }
 
     if (_isNegative(text)) {
-      _flow.moveTo(OnboardingStep.askName);
+      _flow.moveTo(OnboardingStep.askRegisterName);
       _isProcessing = false;
       await _speak('Alright. Please tell me your name again.');
       await _startListening();
@@ -397,31 +612,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await _startListening();
   }
 
-  // ============================================================
-  // 2. EMAIL STEP
-  // ============================================================
-
-  Future<void> _handleEmail(String text) async {
+  // 2. EMAIL
+  Future<void> _handleRegisterEmail(String text) async {
     final email = _sanitizeEmail(text);
     _flow.setEmail(email);
-    _flow.moveTo(OnboardingStep.confirmEmail);
+    _flow.moveTo(OnboardingStep.confirmRegisterEmail);
     _isProcessing = false;
 
     await _speak('Is your email $email? Please say yes or no.');
     await _startListening();
   }
 
-  Future<void> _handleEmailConfirmation(String text) async {
+  Future<void> _handleRegisterEmailConfirmation(String text) async {
     if (_isAffirmative(text)) {
-      _flow.moveTo(OnboardingStep.askPhone);
+      _flow.moveTo(OnboardingStep.askRegisterDob);
       _isProcessing = false;
-      await _speak('Thank you. Now, please tell me your 10-digit mobile phone number.');
+      await _speak('Thank you. Now please tell me your date of birth, for example: 15 August 2000.');
       await _startListening();
       return;
     }
 
     if (_isNegative(text)) {
-      _flow.moveTo(OnboardingStep.askEmail);
+      _flow.moveTo(OnboardingStep.askRegisterEmail);
       _isProcessing = false;
       await _speak('Please tell me your email address again.');
       await _startListening();
@@ -433,55 +645,61 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await _startListening();
   }
 
-  // ============================================================
-  // 3. PHONE NUMBER & USER REGISTRATION
-  // ============================================================
+  // 3. DATE OF BIRTH (DOB)
+  Future<void> _handleRegisterDob(String text) async {
+    final dob = _cleanDob(text);
+    _flow.setDob(dob);
+    _flow.moveTo(OnboardingStep.confirmRegisterDob);
+    _isProcessing = false;
 
-  Future<void> _handlePhone(String text) async {
+    await _speak('Is your date of birth $dob? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleRegisterDobConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askRegisterPhone);
+      _isProcessing = false;
+      await _speak('Got it. Now please tell me your 10-digit mobile phone number.');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askRegisterDob);
+      _isProcessing = false;
+      await _speak('Please tell me your date of birth again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your date of birth ${_flow.dateOfBirth}? Say yes or no.');
+    await _startListening();
+  }
+
+  // 4. PHONE NUMBER
+  Future<void> _handleRegisterPhone(String text) async {
     final phone = _sanitizePhone(text);
     _flow.setPhone(phone);
-    _flow.moveTo(OnboardingStep.confirmPhone);
+    _flow.moveTo(OnboardingStep.confirmRegisterPhone);
     _isProcessing = false;
 
     await _speak('Is your phone number $phone? Please say yes or no.');
     await _startListening();
   }
 
-  Future<void> _handlePhoneConfirmation(String text) async {
+  Future<void> _handleRegisterPhoneConfirmation(String text) async {
     if (_isAffirmative(text)) {
-      _isProcessing = true;
-      _setStatus('Registering your account in MySQL database...');
-
-      try {
-        final user = await _backendApiService.registerOrLoginUser(
-          userName: _flow.userName ?? 'User',
-          userEmail: _flow.userEmail ?? 'user@companion.local',
-          phoneNumber: _flow.phoneNumber ?? '0000000000',
-          preferredLanguage: 'English',
-        );
-
-        if (user['user_id'] != null) {
-          _flow.setUserId(user['user_id'] as int);
-        }
-      } catch (e) {
-        debugPrint('Database registration error: $e');
-      }
-
-      // One thing at a time: Ask emergency contact NAME first
-      _flow.moveTo(OnboardingStep.askEmergencyName);
+      _flow.moveTo(OnboardingStep.askRegisterPassword);
       _isProcessing = false;
-
-      await _speak(
-        'Your profile has been created in the database. '
-        'For your safety, let us add an emergency contact. '
-        'First, what is your emergency contact person name?',
-      );
+      await _speak('Thank you. Please choose a password for your account.');
       await _startListening();
       return;
     }
 
     if (_isNegative(text)) {
-      _flow.moveTo(OnboardingStep.askPhone);
+      _flow.moveTo(OnboardingStep.askRegisterPhone);
       _isProcessing = false;
       await _speak('Please tell me your phone number again.');
       await _startListening();
@@ -489,14 +707,69 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
 
     _isProcessing = false;
-    await _speak('Is your phone number ${_flow.phoneNumber}? Please say yes or no.');
+    await _speak('Is your phone number ${_flow.phoneNumber}? Say yes or no.');
+    await _startListening();
+  }
+
+  // 5. PASSWORD & USER TABLE INSERT
+  Future<void> _handleRegisterPassword(String text) async {
+    final pass = _cleanPassword(text);
+    _flow.setPassword(pass);
+    _flow.moveTo(OnboardingStep.confirmRegisterPassword);
+    _isProcessing = false;
+
+    await _speak('Is your password $pass? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleRegisterPasswordConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _isProcessing = true;
+      _setStatus('Registering user in MySQL database...');
+
+      final regResult = await _backendApiService.registerUser(
+        userName: _flow.userName ?? 'User',
+        userEmail: _flow.userEmail ?? 'user@companion.local',
+        dateOfBirth: _flow.dateOfBirth ?? '2000-01-01',
+        phoneNumber: _flow.phoneNumber ?? '0000000000',
+        password: _flow.password ?? '123456',
+        preferredLanguage: 'English',
+      );
+
+      if (regResult['success'] == true) {
+        final user = regResult['user'] as Map<String, dynamic>;
+        _flow.setUserId(user['user_id'] as int);
+      } else {
+        debugPrint('Registration note: ${regResult['message']}');
+      }
+
+      // Move to emergency person details
+      _flow.moveTo(OnboardingStep.askEmergencyName);
+      _isProcessing = false;
+
+      await _speak('Your profile is saved in the database. For your safety, let us add an emergency contact person. What is their name?');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askRegisterPassword);
+      _isProcessing = false;
+      await _speak('Please tell me your password again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your password ${_flow.password}? Say yes or no.');
     await _startListening();
   }
 
   // ============================================================
-  // 4A. EMERGENCY CONTACT NAME
+  // EMERGENCY PERSON DETAILS (NAME, RELATIONSHIP, PHONE)
   // ============================================================
 
+  // 6. EMERGENCY NAME
   Future<void> _handleEmergencyName(String text) async {
     final name = _cleanSpokenText(text);
     _flow.setEmergencyName(name);
@@ -509,10 +782,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _handleEmergencyNameConfirmation(String text) async {
     if (_isAffirmative(text)) {
-      _flow.moveTo(OnboardingStep.askEmergencyPhone);
+      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
       _isProcessing = false;
-
-      await _speak('Got it. What is ${_flow.emergencyContactName} phone number?');
+      await _speak('What is their relationship with you, such as father, mother, spouse, or friend?');
       await _startListening();
       return;
     }
@@ -530,10 +802,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     await _startListening();
   }
 
-  // ============================================================
-  // 4B. EMERGENCY CONTACT PHONE NUMBER
-  // ============================================================
+  // 7. EMERGENCY RELATIONSHIP
+  Future<void> _handleEmergencyRelationship(String text) async {
+    final rel = _cleanSpokenText(text);
+    _flow.setEmergencyRelationship(rel);
+    _flow.moveTo(OnboardingStep.confirmEmergencyRelationship);
+    _isProcessing = false;
 
+    await _speak('Is their relationship $rel? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleEmergencyRelationshipConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyPhone);
+      _isProcessing = false;
+      await _speak('What is ${_flow.emergencyContactName} phone number?');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
+      _isProcessing = false;
+      await _speak('Please tell me their relationship again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is their relationship ${_flow.emergencyContactRelationship}? Say yes or no.');
+    await _startListening();
+  }
+
+  // 8. EMERGENCY PHONE NUMBER & SAVE TO MYSQL
   Future<void> _handleEmergencyPhone(String text) async {
     final phone = _sanitizePhone(text);
     _flow.setEmergencyPhone(phone);
@@ -546,12 +848,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Future<void> _handleEmergencyPhoneConfirmation(String text) async {
     if (_isAffirmative(text)) {
-      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
+      _isProcessing = true;
+      _setStatus('Saving emergency contact to MySQL database...');
+
+      try {
+        await _backendApiService.addEmergencyContact(
+          userId: _flow.userId ?? 1,
+          name: _flow.emergencyContactName ?? 'Caregiver',
+          relationship: _flow.emergencyContactRelationship ?? 'Family',
+          phoneNumber: _flow.emergencyContactPhone ?? '9999999999',
+        );
+      } catch (e) {
+        debugPrint('Emergency contact save error: $e');
+      }
+
+      _flow.moveTo(OnboardingStep.askLocationName);
       _isProcessing = false;
 
-      await _speak(
-        'Thank you. What is their relationship with you, such as mother, brother, friend, or caregiver?',
-      );
+      await _speak('Emergency contact saved. Now let us save your location. What is your location name or address?');
       await _startListening();
       return;
     }
@@ -570,74 +884,54 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // 4C. EMERGENCY CONTACT RELATIONSHIP & SAVE TO MYSQL
+  // LOCATION DETAILS (LOCATION NAME, LOCATION TYPE)
   // ============================================================
 
-  Future<void> _handleEmergencyRelationship(String text) async {
-    final rel = _cleanSpokenText(text);
-    _flow.setEmergencyRelationship(rel);
-    _flow.moveTo(OnboardingStep.confirmEmergencyRelationship);
-    _isProcessing = false;
-
-    await _speak('Is their relationship $rel? Please say yes or no.');
-    await _startListening();
-  }
-
-  Future<void> _handleEmergencyRelationshipConfirmation(String text) async {
-    if (_isAffirmative(text)) {
-      _isProcessing = true;
-      _setStatus('Saving emergency contact to MySQL database...');
-
-      try {
-        await _backendApiService.addEmergencyContact(
-          userId: _flow.userId ?? 1,
-          name: _flow.emergencyContactName ?? 'Caregiver',
-          phoneNumber: _flow.emergencyContactPhone ?? '9999999999',
-          relationship: _flow.emergencyContactRelationship ?? 'Caregiver',
-        );
-      } catch (e) {
-        debugPrint('Emergency contact save error: $e');
-      }
-
-      _flow.moveTo(OnboardingStep.askHomeLocation);
-      _isProcessing = false;
-
-      await _speak(
-        'Emergency contact saved to the database. '
-        'Next, what is your home address or city name?',
-      );
-      await _startListening();
-      return;
-    }
-
-    if (_isNegative(text)) {
-      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
-      _isProcessing = false;
-      await _speak('Please tell me their relationship again.');
-      await _startListening();
-      return;
-    }
-
-    _isProcessing = false;
-    await _speak('Is their relationship ${_flow.emergencyContactRelationship}? Say yes or no.');
-    await _startListening();
-  }
-
-  // ============================================================
-  // 5. HOME LOCATION & SAVE TO MYSQL
-  // ============================================================
-
-  Future<void> _handleHomeLocation(String text) async {
+  // 9. LOCATION NAME
+  Future<void> _handleLocationName(String text) async {
     final loc = _cleanSpokenText(text);
-    _flow.setHomeLocation(loc);
-    _flow.moveTo(OnboardingStep.confirmHomeLocation);
+    _flow.setLocationName(loc);
+    _flow.moveTo(OnboardingStep.confirmLocationName);
     _isProcessing = false;
 
     await _speak('Is your location $loc? Please say yes or no.');
     await _startListening();
   }
 
-  Future<void> _handleHomeLocationConfirmation(String text) async {
+  Future<void> _handleLocationNameConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askLocationType);
+      _isProcessing = false;
+      await _speak('What is this location type, like Home or Office?');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askLocationName);
+      _isProcessing = false;
+      await _speak('Please tell me your location address again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your location ${_flow.locationName}? Say yes or no.');
+    await _startListening();
+  }
+
+  // 10. LOCATION TYPE & SAVE TO MYSQL
+  Future<void> _handleLocationType(String text) async {
+    final type = _cleanSpokenText(text);
+    _flow.setLocationType(type);
+    _flow.moveTo(OnboardingStep.confirmLocationType);
+    _isProcessing = false;
+
+    await _speak('Is this location type $type? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleLocationTypeConfirmation(String text) async {
     if (_isAffirmative(text)) {
       _isProcessing = true;
       _setStatus('Saving location to MySQL database...');
@@ -645,9 +939,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       try {
         await _backendApiService.addLocation(
           userId: _flow.userId ?? 1,
-          locationName: 'Home',
-          address: _flow.homeLocation ?? 'Home Address',
-          locationType: 'home',
+          locationName: _flow.locationName ?? 'My Place',
+          locationType: _flow.locationType ?? 'home',
+          address: _flow.locationName,
         );
       } catch (e) {
         debugPrint('Location save error: $e');
@@ -656,29 +950,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _flow.moveTo(OnboardingStep.completed);
       _isProcessing = false;
 
-      await _speak(
-        'Setup is completely finished! Your profile, emergency contact, and location have all been saved in the database. '
-        'You can now talk to me, ask me to remember notes, or ask for help anytime.',
-      );
+      await _speak('Setup is completely finished! All your profile, emergency contact, and location details have been saved in the database. You can now talk to me, ask me to remember notes, or ask for help anytime.');
       await _startListening();
       return;
     }
 
     if (_isNegative(text)) {
-      _flow.moveTo(OnboardingStep.askHomeLocation);
+      _flow.moveTo(OnboardingStep.askLocationType);
       _isProcessing = false;
-      await _speak('Please tell me your home location again.');
+      await _speak('Please tell me your location type again, like Home or Office.');
       await _startListening();
       return;
     }
 
     _isProcessing = false;
-    await _speak('Is your location ${_flow.homeLocation}? Say yes or no.');
+    await _speak('Is your location type ${_flow.locationType}? Say yes or no.');
     await _startListening();
   }
 
   // ============================================================
-  // 6. AFTER ONBOARDING: VOICE COMMANDS & MEMORY VAULT
+  // AFTER ONBOARDING: COMMANDS & MEMORY VAULT
   // ============================================================
 
   Future<void> _handleAfterOnboarding(String text) async {
@@ -776,7 +1067,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // UI WITH LIVE STATUS & MANUAL INPUT
+  // ACCESSIBLE UI
   // ============================================================
 
   @override
