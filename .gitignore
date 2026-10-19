@@ -3,3 +3,12 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# Flutter / Dart
+Frontend/.dart_tool/
+Frontend/build/
+.dart_tool/
+build/
+*.dill
+.flutter-plugins
+.flutter-plugins-dependencies

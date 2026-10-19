@@ -11,7 +11,7 @@ class SpeechService {
     if (await _audioRecorder.hasPermission()) {
       // On web, a path argument can be empty or a dummy name
       await _audioRecorder.start(
-        const RecordConfig(encoder: AudioEncoder.webmOpus, sampleRate: 16000), 
+        const RecordConfig(encoder: AudioEncoder.opus, sampleRate: 16000), 
         path: '', 
       );
       print("Browser recording started...");

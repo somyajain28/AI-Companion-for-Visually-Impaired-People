@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../logic/onboarding_flow.dart';
 import '../services/audio_recording_service.dart';
+import '../services/backend_api_service.dart';
 import '../services/speech_api_service.dart';
 import '../services/tts_service.dart';
 
@@ -17,6 +18,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final TtsService _ttsService = TtsService();
   final AudioRecordingService _audioService = AudioRecordingService();
   final SpeechApiService _speechApiService = SpeechApiService();
+  final BackendApiService _backendApiService = BackendApiService();
   final OnboardingFlow _flow = OnboardingFlow();
 
   final TextEditingController _textController = TextEditingController();
@@ -33,7 +35,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   void initState() {
     super.initState();
-
     _keyboardFocusNode.requestFocus();
   }
 
@@ -43,7 +44,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _keyboardFocusNode.dispose();
     _textFocusNode.dispose();
     _audioService.dispose();
-
     super.dispose();
   }
 
@@ -52,87 +52,38 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // ============================================================
 
   Future<void> _startCompanion() async {
-    // VERY IMPORTANT:
-    // Prevent the conversation from starting more than once.
     if (_started) {
       return;
     }
-
     _started = true;
-
     _setStatus('Starting AI Companion...');
 
     try {
       await _ttsService.initialize();
-
       final microphoneReady = await _audioService.initialize();
 
       if (!microphoneReady) {
         _started = false;
-
-        _setStatus(
-          'Microphone permission is required. '
-          'Please allow microphone access and try again.',
-        );
-
-        await _speak(
-          'Microphone permission is required. '
-          'Please allow microphone access and try again.',
-        );
-
+        _setStatus('Microphone permission is required. Please allow access.');
+        await _speak('Microphone permission is required. Please allow microphone access and try again.');
         return;
       }
 
-      await _askLanguage();
+      await _askName();
     } catch (e) {
       _started = false;
-
       _setStatus('Unable to start the assistant.');
-
       debugPrint('Start companion error: $e');
     }
   }
 
   // ============================================================
-  // ASK LANGUAGE
-  // ============================================================
-
-  Future<void> _askLanguage() async {
-    if (!mounted) {
-      return;
-    }
-
-    _flow.moveTo(OnboardingStep.askLanguage);
-
-    await _speak(
-      'Welcome to AI Companion. '
-      'I am here to help you. '
-      'Let us get started.',
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _speak(
-      'Are you comfortable with this language? '
-      'If no, then tell me your language.',
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _startListening();
-  }
-
-  // ============================================================
-  // SPEAK
+  // SPEAK (INDIAN ENGLISH - en-IN)
   // ============================================================
 
   Future<void> _speak(
     String text, {
-    String language = 'en-US',
+    String language = 'en-IN',
   }) async {
     if (!mounted) {
       return;
@@ -141,14 +92,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() {
       _isSpeaking = true;
       _isListening = false;
-      _status = 'Speaking...';
+      _status = 'Speaking: $text';
     });
 
     try {
-      await _ttsService.speak(
-        text,
-        language: language,
-      );
+      await _ttsService.speak(text, language: language);
     } catch (e) {
       debugPrint('TTS error: $e');
     }
@@ -164,30 +112,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // AUTOMATIC RECORDING
+  // AUTOMATIC RECORDING (8 SECONDS LISTENING WINDOW)
   // ============================================================
 
   Future<void> _startListening() async {
-    if (!mounted) {
-      return;
-    }
-
-    if (_isListening || _isProcessing || _isSpeaking) {
+    if (!mounted || _isListening || _isProcessing || _isSpeaking) {
       return;
     }
 
     try {
       setState(() {
         _isListening = true;
-        _status = 'Listening...';
+        _status = 'Listening... Please speak now.';
       });
 
       await _audioService.startRecording();
 
-      // Recording window for the current prototype.
-      await Future.delayed(
-        const Duration(seconds: 5),
-      );
+      // Increased to 8 seconds so the user can comfortably finish their sentence
+      await Future.delayed(const Duration(seconds: 8));
 
       if (!mounted) {
         return;
@@ -196,20 +138,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       await _finishListening();
     } catch (e) {
       debugPrint('Recording error: $e');
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _isListening = false;
-        _status = 'Microphone could not be started.';
+        _status = 'Microphone error. Please try again.';
       });
     }
   }
 
   // ============================================================
-  // STOP RECORDING AND SEND TO BACKEND
+  // STOP RECORDING AND SEND TO BACKEND (ENGLISH WHISPER)
   // ============================================================
 
   Future<void> _finishListening() async {
@@ -220,18 +158,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() {
       _isListening = false;
       _isProcessing = true;
-      _status = 'Processing...';
+      _status = 'Processing your speech...';
     });
 
     try {
       final audioBytes = await _audioService.stopRecording();
-
       if (audioBytes == null || audioBytes.isEmpty) {
         throw Exception('No audio was recorded.');
       }
 
+      // Explicitly transcribe in English
       final result = await _speechApiService.convertSpeechToText(
         audioBytes,
+        language: 'en',
       );
 
       if (!mounted) {
@@ -243,40 +182,81 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (text.isEmpty) {
         setState(() {
           _isProcessing = false;
-          _status = 'I could not hear anything.';
+          _status = 'I did not catch that. Please speak again.';
         });
-
-        await _speak(
-          'I could not hear anything. '
-          'Please try again.',
-        );
-
+        await _speak('I did not catch that. Please speak again.');
+        await _startListening();
         return;
       }
 
       await _handleUserInput(text);
     } catch (e) {
       debugPrint('Voice processing error: $e');
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setState(() {
         _isProcessing = false;
-        _status = 'Voice processing is not connected yet.';
+        _status = 'Could not process speech. You may speak again or type below.';
       });
-
-      // IMPORTANT:
-      // Do NOT restart listening here.
-      //
-      // This prevents the infinite speaking/listening loop
-      // when Flask is not running on this laptop.
     }
   }
 
   // ============================================================
-  // HANDLE USER INPUT
+  // AFFIRMATION & NEGATION HELPERS
+  // ============================================================
+
+  bool _isAffirmative(String text) {
+    final lower = text.toLowerCase().trim();
+    return lower.contains('yes') ||
+        lower.contains('yeah') ||
+        lower.contains('yep') ||
+        lower.contains('yup') ||
+        lower.contains('ya') ||
+        lower.contains('correct') ||
+        lower.contains('right') ||
+        lower.contains('sure') ||
+        lower.contains('ok') ||
+        lower.contains('okay') ||
+        lower.contains('true') ||
+        lower.contains('haan') ||
+        lower.contains('han');
+  }
+
+  bool _isNegative(String text) {
+    final lower = text.toLowerCase().trim();
+    return lower.contains('no') ||
+        lower.contains('nah') ||
+        lower.contains('nope') ||
+        lower.contains('wrong') ||
+        lower.contains('not') ||
+        lower.contains('change') ||
+        lower.contains('na');
+  }
+
+  String _cleanSpokenText(String input) {
+    return input.trim().replaceAll(RegExp(r'[\.\,\!\?]+$'), '').trim();
+  }
+
+  String _sanitizeEmail(String text) {
+    var s = text.trim().toLowerCase();
+    s = s.replaceAll(' at the rate ', '@');
+    s = s.replaceAll(' at rate ', '@');
+    s = s.replaceAll(' at ', '@');
+    s = s.replaceAll(' dot ', '.');
+    s = s.replaceAll(' ', '');
+    s = s.replaceAll(RegExp(r'[\,\!\?]+$'), '');
+    if (!s.contains('@')) {
+      s = '$s@gmail.com';
+    }
+    return s;
+  }
+
+  String _sanitizePhone(String text) {
+    final digits = text.replaceAll(RegExp(r'[^\d+]'), '');
+    return digits.isNotEmpty ? digits : text.trim();
+  }
+
+  // ============================================================
+  // STATE MACHINE: ONE STEP AT A TIME
   // ============================================================
 
   Future<void> _handleUserInput(String text) async {
@@ -286,24 +266,13 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     setState(() {
       _isProcessing = true;
-      _status = 'Understanding...';
+      _status = 'Heard: "$text"';
     });
 
     final currentStep = _flow.currentStep;
 
     switch (currentStep) {
-      case OnboardingStep.askLanguage:
-        await _handleLanguage(text);
-        break;
-
-      case OnboardingStep.confirmHindi:
-        await _handleHindiConfirmation(text);
-        break;
-
-      case OnboardingStep.languageSet:
-        await _askName();
-        break;
-
+      case OnboardingStep.welcome:
       case OnboardingStep.askName:
         await _handleName(text);
         break;
@@ -312,8 +281,52 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await _handleNameConfirmation(text);
         break;
 
-      case OnboardingStep.welcome:
-        await _askLanguage();
+      case OnboardingStep.askEmail:
+        await _handleEmail(text);
+        break;
+
+      case OnboardingStep.confirmEmail:
+        await _handleEmailConfirmation(text);
+        break;
+
+      case OnboardingStep.askPhone:
+        await _handlePhone(text);
+        break;
+
+      case OnboardingStep.confirmPhone:
+        await _handlePhoneConfirmation(text);
+        break;
+
+      case OnboardingStep.askEmergencyName:
+        await _handleEmergencyName(text);
+        break;
+
+      case OnboardingStep.confirmEmergencyName:
+        await _handleEmergencyNameConfirmation(text);
+        break;
+
+      case OnboardingStep.askEmergencyPhone:
+        await _handleEmergencyPhone(text);
+        break;
+
+      case OnboardingStep.confirmEmergencyPhone:
+        await _handleEmergencyPhoneConfirmation(text);
+        break;
+
+      case OnboardingStep.askEmergencyRelationship:
+        await _handleEmergencyRelationship(text);
+        break;
+
+      case OnboardingStep.confirmEmergencyRelationship:
+        await _handleEmergencyRelationshipConfirmation(text);
+        break;
+
+      case OnboardingStep.askHomeLocation:
+        await _handleHomeLocation(text);
+        break;
+
+      case OnboardingStep.confirmHomeLocation:
+        await _handleHomeLocationConfirmation(text);
         break;
 
       case OnboardingStep.completed:
@@ -323,246 +336,435 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // LANGUAGE
-  // ============================================================
-
-  Future<void> _handleLanguage(String text) async {
-    final lowerText = text.toLowerCase();
-
-    final isHindi =
-        lowerText.contains('hindi') ||
-        lowerText.contains('हिंदी');
-
-    if (isHindi) {
-      _flow.setLanguage('Hindi');
-
-      _flow.moveTo(
-        OnboardingStep.confirmHindi,
-      );
-
-      _isProcessing = false;
-
-      await _speak(
-        'क्या आप हिंदी भाषा से सहमत हैं?',
-        language: 'hi-IN',
-      );
-
-      await _startListening();
-
-      return;
-    }
-
-    _flow.setLanguage(text);
-
-    _flow.moveTo(
-      OnboardingStep.languageSet,
-    );
-
-    _isProcessing = false;
-
-    await _speak(
-      'Your preferred language has been set.',
-    );
-
-    await _askName();
-  }
-
-  // ============================================================
-  // HINDI CONFIRMATION
-  // ============================================================
-
-  Future<void> _handleHindiConfirmation(String text) async {
-    final lowerText = text.toLowerCase();
-
-    final confirmed =
-        lowerText.contains('yes') ||
-        lowerText.contains('haan') ||
-        lowerText.contains('han') ||
-        lowerText.contains('हाँ') ||
-        lowerText.contains('हां') ||
-        lowerText.contains('जी') ||
-        lowerText.contains('yes');
-
-    if (confirmed) {
-      _flow.setLanguage('Hindi');
-
-      _flow.moveTo(
-        OnboardingStep.languageSet,
-      );
-
-      _isProcessing = false;
-
-      await _speak(
-        'आपकी आम भाषा हिंदी सेट कर दी गई है।',
-        language: 'hi-IN',
-      );
-
-      await _askName();
-
-      return;
-    }
-
-    _isProcessing = false;
-
-    await _speak(
-      'ठीक है। कृपया अपनी पसंदीदा भाषा बताइए।',
-      language: 'hi-IN',
-    );
-
-    await _startListening();
-  }
-
-  // ============================================================
-  // ASK NAME
+  // 1. FULL NAME STEP
   // ============================================================
 
   Future<void> _askName() async {
-    if (!mounted) {
-      return;
-    }
-
-    _flow.moveTo(
-      OnboardingStep.askName,
-    );
-
+    if (!mounted) return;
+    _flow.moveTo(OnboardingStep.askName);
     _isProcessing = false;
-
     await _speak(
-      'नमस्ते। अपना नाम बताइए।',
-      language: 'hi-IN',
+      'Welcome to AI Companion. I will assist you with reading, navigation, and remembering details. '
+      'Let us set up your profile. Please tell me your full name.',
     );
-
     await _startListening();
   }
 
-  // ============================================================
-  // HANDLE NAME
-  // ============================================================
-
   Future<void> _handleName(String text) async {
-    final name = text.trim();
+    var name = _cleanSpokenText(text);
+
+    final prefixes = ['my name is', 'i am', 'this is', 'name is'];
+    for (final p in prefixes) {
+      if (name.toLowerCase().startsWith(p)) {
+        name = name.substring(p.length).trim();
+      }
+    }
 
     if (name.isEmpty) {
-      await _speak(
-        'मुझे आपका नाम सुनाई नहीं दिया। '
-        'कृपया फिर से अपना नाम बताइए।',
-        language: 'hi-IN',
-      );
-
+      _isProcessing = false;
+      await _speak('I did not catch your name. Please say your name again.');
       await _startListening();
-
       return;
     }
 
     _flow.setName(name);
-
-    _flow.moveTo(
-      OnboardingStep.confirmName,
-    );
-
+    _flow.moveTo(OnboardingStep.confirmName);
     _isProcessing = false;
 
-    await _speak(
-      'क्या आपका नाम $name है? हाँ या ना।',
-      language: 'hi-IN',
-    );
-
+    await _speak('Is your name $name? Please say yes or no.');
     await _startListening();
   }
 
-  // ============================================================
-  // CONFIRM NAME
-  // ============================================================
-
   Future<void> _handleNameConfirmation(String text) async {
-    final lowerText = text.toLowerCase();
-
-    final confirmed =
-        lowerText.contains('yes') ||
-        lowerText.contains('haan') ||
-        lowerText.contains('han') ||
-        lowerText.contains('हाँ') ||
-        lowerText.contains('हां') ||
-        lowerText.contains('जी');
-
-    if (confirmed) {
-      _flow.moveTo(
-        OnboardingStep.completed,
-      );
-
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askEmail);
       _isProcessing = false;
-
-      await _speak(
-        'धन्यवाद। आपका setup पूरा हो गया है। '
-        'अब आप मुझसे बात कर सकते हैं।',
-        language: 'hi-IN',
-      );
-
+      await _speak('Great, ${_flow.userName}. Now, please tell me your email address.');
+      await _startListening();
       return;
     }
 
-    _flow.moveTo(
-      OnboardingStep.askName,
-    );
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askName);
+      _isProcessing = false;
+      await _speak('Alright. Please tell me your name again.');
+      await _startListening();
+      return;
+    }
 
     _isProcessing = false;
-
-    await _speak(
-      'ठीक है। अपना नाम फिर से बताइए।',
-      language: 'hi-IN',
-    );
-
+    await _speak('Is your name ${_flow.userName}? Please say yes or no.');
     await _startListening();
   }
 
   // ============================================================
-  // AFTER ONBOARDING
+  // 2. EMAIL STEP
+  // ============================================================
+
+  Future<void> _handleEmail(String text) async {
+    final email = _sanitizeEmail(text);
+    _flow.setEmail(email);
+    _flow.moveTo(OnboardingStep.confirmEmail);
+    _isProcessing = false;
+
+    await _speak('Is your email $email? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleEmailConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askPhone);
+      _isProcessing = false;
+      await _speak('Thank you. Now, please tell me your 10-digit mobile phone number.');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askEmail);
+      _isProcessing = false;
+      await _speak('Please tell me your email address again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your email ${_flow.userEmail}? Please say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 3. PHONE NUMBER & USER REGISTRATION
+  // ============================================================
+
+  Future<void> _handlePhone(String text) async {
+    final phone = _sanitizePhone(text);
+    _flow.setPhone(phone);
+    _flow.moveTo(OnboardingStep.confirmPhone);
+    _isProcessing = false;
+
+    await _speak('Is your phone number $phone? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handlePhoneConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _isProcessing = true;
+      _setStatus('Registering your account in MySQL database...');
+
+      try {
+        final user = await _backendApiService.registerOrLoginUser(
+          userName: _flow.userName ?? 'User',
+          userEmail: _flow.userEmail ?? 'user@companion.local',
+          phoneNumber: _flow.phoneNumber ?? '0000000000',
+          preferredLanguage: 'English',
+        );
+
+        if (user['user_id'] != null) {
+          _flow.setUserId(user['user_id'] as int);
+        }
+      } catch (e) {
+        debugPrint('Database registration error: $e');
+      }
+
+      // One thing at a time: Ask emergency contact NAME first
+      _flow.moveTo(OnboardingStep.askEmergencyName);
+      _isProcessing = false;
+
+      await _speak(
+        'Your profile has been created in the database. '
+        'For your safety, let us add an emergency contact. '
+        'First, what is your emergency contact person name?',
+      );
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askPhone);
+      _isProcessing = false;
+      await _speak('Please tell me your phone number again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your phone number ${_flow.phoneNumber}? Please say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 4A. EMERGENCY CONTACT NAME
+  // ============================================================
+
+  Future<void> _handleEmergencyName(String text) async {
+    final name = _cleanSpokenText(text);
+    _flow.setEmergencyName(name);
+    _flow.moveTo(OnboardingStep.confirmEmergencyName);
+    _isProcessing = false;
+
+    await _speak('Is your emergency contact name $name? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleEmergencyNameConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyPhone);
+      _isProcessing = false;
+
+      await _speak('Got it. What is ${_flow.emergencyContactName} phone number?');
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyName);
+      _isProcessing = false;
+      await _speak('Please tell me their name again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is their name ${_flow.emergencyContactName}? Say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 4B. EMERGENCY CONTACT PHONE NUMBER
+  // ============================================================
+
+  Future<void> _handleEmergencyPhone(String text) async {
+    final phone = _sanitizePhone(text);
+    _flow.setEmergencyPhone(phone);
+    _flow.moveTo(OnboardingStep.confirmEmergencyPhone);
+    _isProcessing = false;
+
+    await _speak('Is their phone number $phone? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleEmergencyPhoneConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
+      _isProcessing = false;
+
+      await _speak(
+        'Thank you. What is their relationship with you, such as mother, brother, friend, or caregiver?',
+      );
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyPhone);
+      _isProcessing = false;
+      await _speak('Please tell me their phone number again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is their phone number ${_flow.emergencyContactPhone}? Say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 4C. EMERGENCY CONTACT RELATIONSHIP & SAVE TO MYSQL
+  // ============================================================
+
+  Future<void> _handleEmergencyRelationship(String text) async {
+    final rel = _cleanSpokenText(text);
+    _flow.setEmergencyRelationship(rel);
+    _flow.moveTo(OnboardingStep.confirmEmergencyRelationship);
+    _isProcessing = false;
+
+    await _speak('Is their relationship $rel? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleEmergencyRelationshipConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _isProcessing = true;
+      _setStatus('Saving emergency contact to MySQL database...');
+
+      try {
+        await _backendApiService.addEmergencyContact(
+          userId: _flow.userId ?? 1,
+          name: _flow.emergencyContactName ?? 'Caregiver',
+          phoneNumber: _flow.emergencyContactPhone ?? '9999999999',
+          relationship: _flow.emergencyContactRelationship ?? 'Caregiver',
+        );
+      } catch (e) {
+        debugPrint('Emergency contact save error: $e');
+      }
+
+      _flow.moveTo(OnboardingStep.askHomeLocation);
+      _isProcessing = false;
+
+      await _speak(
+        'Emergency contact saved to the database. '
+        'Next, what is your home address or city name?',
+      );
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askEmergencyRelationship);
+      _isProcessing = false;
+      await _speak('Please tell me their relationship again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is their relationship ${_flow.emergencyContactRelationship}? Say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 5. HOME LOCATION & SAVE TO MYSQL
+  // ============================================================
+
+  Future<void> _handleHomeLocation(String text) async {
+    final loc = _cleanSpokenText(text);
+    _flow.setHomeLocation(loc);
+    _flow.moveTo(OnboardingStep.confirmHomeLocation);
+    _isProcessing = false;
+
+    await _speak('Is your location $loc? Please say yes or no.');
+    await _startListening();
+  }
+
+  Future<void> _handleHomeLocationConfirmation(String text) async {
+    if (_isAffirmative(text)) {
+      _isProcessing = true;
+      _setStatus('Saving location to MySQL database...');
+
+      try {
+        await _backendApiService.addLocation(
+          userId: _flow.userId ?? 1,
+          locationName: 'Home',
+          address: _flow.homeLocation ?? 'Home Address',
+          locationType: 'home',
+        );
+      } catch (e) {
+        debugPrint('Location save error: $e');
+      }
+
+      _flow.moveTo(OnboardingStep.completed);
+      _isProcessing = false;
+
+      await _speak(
+        'Setup is completely finished! Your profile, emergency contact, and location have all been saved in the database. '
+        'You can now talk to me, ask me to remember notes, or ask for help anytime.',
+      );
+      await _startListening();
+      return;
+    }
+
+    if (_isNegative(text)) {
+      _flow.moveTo(OnboardingStep.askHomeLocation);
+      _isProcessing = false;
+      await _speak('Please tell me your home location again.');
+      await _startListening();
+      return;
+    }
+
+    _isProcessing = false;
+    await _speak('Is your location ${_flow.homeLocation}? Say yes or no.');
+    await _startListening();
+  }
+
+  // ============================================================
+  // 6. AFTER ONBOARDING: VOICE COMMANDS & MEMORY VAULT
   // ============================================================
 
   Future<void> _handleAfterOnboarding(String text) async {
-    _isProcessing = false;
+    _isProcessing = true;
+    final lower = text.toLowerCase();
 
-    await _speak(
-      'आपने कहा: $text',
-      language: 'hi-IN',
-    );
+    // Query saved notes from MySQL
+    final isQuery = lower.contains('what did i save') ||
+        lower.contains('my notes') ||
+        lower.contains('read notes') ||
+        lower.contains('what are my notes') ||
+        lower.contains('what do i have saved');
+
+    if (isQuery) {
+      _setStatus('Fetching your notes from database...');
+      try {
+        final notes = await _backendApiService.getSavedInformation(
+          _flow.userId ?? 1,
+        );
+        _isProcessing = false;
+
+        if (notes.isEmpty) {
+          await _speak('You do not have any saved notes in the database yet.');
+        } else {
+          final summary = notes
+              .take(5)
+              .map((n) => n['content']?.toString() ?? '')
+              .where((c) => c.isNotEmpty)
+              .join('. ');
+
+          await _speak('Here are your saved notes: $summary');
+        }
+      } catch (e) {
+        _isProcessing = false;
+        debugPrint('Fetch saved notes error: $e');
+        await _speak('Could not fetch saved notes from the database.');
+      }
+
+      await _startListening();
+      return;
+    }
+
+    // Default: Save spoken note into MySQL SAVED_INFORMATION table
+    _setStatus('Saving note to MySQL database...');
+    try {
+      await _backendApiService.saveInformation(
+        userId: _flow.userId ?? 1,
+        content: text,
+        title: 'Voice Note',
+        informationType: 'voice_memory',
+      );
+
+      _setStatus('Saved to database!');
+      _isProcessing = false;
+
+      await _speak('I have saved that to your memory vault: $text');
+    } catch (e) {
+      _isProcessing = false;
+      debugPrint('Save information to database error: $e');
+      await _speak('Could not save that note to the database: $text');
+    }
 
     await _startListening();
   }
 
   // ============================================================
-  // TEXT INPUT
+  // TEXT INPUT (MANUAL FALLBACK)
   // ============================================================
 
   Future<void> _submitTypedText() async {
     final text = _textController.text.trim();
-
     if (text.isEmpty) {
       return;
     }
-
     _textController.clear();
-
     await _handleUserInput(text);
   }
-
-  // ============================================================
-  // STATUS
-  // ============================================================
 
   void _setStatus(String value) {
     if (!mounted) {
       return;
     }
-
     setState(() {
       _status = value;
     });
   }
-
-  // ============================================================
-  // KEYBOARD
-  // ============================================================
 
   void _handleKeyEvent(KeyEvent event) {
     if (event is KeyDownEvent &&
@@ -574,7 +776,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   // ============================================================
-  // UI
+  // UI WITH LIVE STATUS & MANUAL INPUT
   // ============================================================
 
   @override
@@ -611,10 +813,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           color: Colors.black,
                         ),
                       ),
-
                       const SizedBox(height: 32),
-
-                      // ONLY ONE STATUS MESSAGE
                       Semantics(
                         liveRegion: true,
                         label: _status,
@@ -627,9 +826,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           ),
                         ),
                       ),
-
                       const SizedBox(height: 40),
-
                       TextField(
                         controller: _textController,
                         focusNode: _textFocusNode,
@@ -639,26 +836,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           _submitTypedText();
                         },
                         decoration: const InputDecoration(
-                          labelText: 'Optional: type your answer',
+                          labelText: 'Type answer or command (optional)',
                           border: OutlineInputBorder(),
                         ),
                       ),
-
                       const SizedBox(height: 16),
-
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
-                          onPressed: _isProcessing
-                              ? null
-                              : _submitTypedText,
+                          onPressed: _isProcessing ? null : _submitTypedText,
                           child: const Padding(
                             padding: EdgeInsets.all(16),
                             child: Text(
-                              'Submit typed answer',
-                              style: TextStyle(
-                                fontSize: 18,
-                              ),
+                              'Submit Answer',
+                              style: TextStyle(fontSize: 18),
                             ),
                           ),
                         ),

@@ -1,0 +1,73 @@
+-- ============================================================
+-- AI Companion Database Schema (MySQL 3NF Normalized Design)
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS ai_companion;
+USE ai_companion;
+
+-- 1. USER TABLE
+CREATE TABLE IF NOT EXISTS `USER` (
+    user_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_name VARCHAR(100) NOT NULL,
+    user_email VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    date_of_birth DATE,
+    phone_number VARCHAR(15),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2. USER PREFERENCES TABLE
+CREATE TABLE IF NOT EXISTS `USER_PREFERENCES` (
+    preference_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL UNIQUE,
+    preferred_language VARCHAR(50) DEFAULT 'en',
+    voice_language VARCHAR(50) DEFAULT 'en-US',
+    speech_rate VARCHAR(20) DEFAULT '1.0',
+    audio_guidance BOOLEAN DEFAULT TRUE,
+    theme VARCHAR(20) DEFAULT 'high-contrast',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES `USER`(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 3. LOCATION TABLE
+CREATE TABLE IF NOT EXISTS `LOCATION` (
+    location_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    location_name VARCHAR(100),
+    location_type VARCHAR(50),
+    address VARCHAR(255),
+    latitude DECIMAL(10,8),
+    longitude DECIMAL(11,8),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES `USER`(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. EMERGENCY CONTACT TABLE
+CREATE TABLE IF NOT EXISTS `EMERGENCY_CONTACT` (
+    contact_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    phone_number VARCHAR(15) NOT NULL,
+    relationship VARCHAR(50),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES `USER`(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 5. SAVED INFORMATION TABLE
+CREATE TABLE IF NOT EXISTS `SAVED_INFORMATION` (
+    saved_info_id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    information_type VARCHAR(50),
+    content TEXT NOT NULL,
+    title VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES `USER`(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
